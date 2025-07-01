@@ -208,6 +208,9 @@ async def clear_history_command(update: Update, context: ContextTypes.DEFAULT_TY
     clear_seen(update.effective_chat.id)
     await update.message.reply_text("История отправленных объявлений очищена.")
 
+async def continue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Спасибо! Если решена капча, парсер продолжит.")
+
 
 def main():
     init_db()
@@ -219,6 +222,7 @@ def main():
     app.add_handler(CommandHandler("remove", remove_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, keyboard_handler))
     app.add_handler(CommandHandler("clear_history", clear_history_command))
+    app.add_handler(CommandHandler("continue", continue_command))
     app.run_polling()
 
 
