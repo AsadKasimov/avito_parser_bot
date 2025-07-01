@@ -12,6 +12,7 @@ DATABASE = 'subscriptions.db'
 MONITOR_INTERVAL = 30
 SEEN_LIMIT = 1000
 
+
 def get_seen(chat_id):
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
@@ -19,6 +20,7 @@ def get_seen(chat_id):
     seen = set(row[0] for row in c.fetchall())
     conn.close()
     return seen
+
 
 def save_seen(chat_id, ad_id):
     conn = sqlite3.connect(DATABASE)
@@ -34,12 +36,14 @@ def save_seen(chat_id, ad_id):
     conn.commit()
     conn.close()
 
+
 def clear_seen(chat_id):
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
     c.execute("DELETE FROM seen WHERE chat_id=?", (chat_id,))
     conn.commit()
     conn.close()
+
 
 def init_db_seen():
     conn = sqlite3.connect(DATABASE)
@@ -55,6 +59,7 @@ def init_db_seen():
     conn.commit()
     conn.close()
 
+
 async def monitor_link_selenium(chat_id, url, app):
     options = Options()
     options.headless = False
@@ -69,7 +74,8 @@ async def monitor_link_selenium(chat_id, url, app):
                 driver.execute_script("window.scrollBy(0, window.innerHeight);")
                 await asyncio.sleep(0.8)
             try:
-                WebDriverWait(driver, 8).until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-marker="item"]')))
+                WebDriverWait(driver, 8).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, '[data-marker="item"]')))
             except Exception:
                 await app.bot.send_message(chat_id, "Ошибка загрузки страницы!")
                 await asyncio.sleep(MONITOR_INTERVAL)
