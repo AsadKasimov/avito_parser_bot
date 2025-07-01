@@ -1,11 +1,11 @@
 import logging
 import asyncio
 import sqlite3
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
-from avito_selenium_parser import monitor_link_selenium
+from avito_selenium_parser import monitor_link_selenium, init_db_seen, clear_seen
 
-BOT_TOKEN = 'БОТ_код'
+BOT_TOKEN = '7278056727:AAEG3cKN8jMoQlRX5ZsElq-KPnwf3xvD0u4'
 DATABASE = 'subscriptions.db'
 
 MENU_BUTTONS = [
@@ -25,15 +25,16 @@ def init_db():
         CREATE TABLE IF NOT EXISTS subscriptions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             chat_id INTEGER,
-            url TEXT
+            url TEXT,
+            added_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
     c.execute("""
         CREATE TABLE IF NOT EXISTS seen (
             chat_id INTEGER,
-            url TEXT,
             ad_id TEXT,
-            PRIMARY KEY(chat_id, url, ad_id)
+            added_at INTEGER,
+            PRIMARY KEY (chat_id, ad_id)
         )
     """)
     conn.commit()
@@ -60,7 +61,7 @@ def remove_link(chat_id, idx):
         sub_id = rows[idx][0]
         url = rows[idx][1]
         c.execute("DELETE FROM subscriptions WHERE id=?", (sub_id,))
-        c.execute("DELETE FROM seen WHERE chat_id=? AND url=?", (chat_id, url))
+        c.execute("DELETE FROM seen WHERE chat_id=? AND ad_id IN (SELECT ad_id FROM seen WHERE chat_id=? LIMIT 1000)", (chat_id, chat_id))
         conn.commit()
         conn.close()
         return url
@@ -83,7 +84,6 @@ def get_links(chat_id):
     conn.close()
     return [row[0] for row in rows]
 
-# Для отслеживания активных задач мониторинга
 active_tasks = {}
 
 def is_allowed(url):
@@ -157,12 +157,11 @@ async def keyboard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not links:
             await update.message.reply_text("Сначала добавь хотя бы одну ссылку!")
             return
-        # Запустить мониторинг по всем ссылкам пользователя
         started = 0
         for url in links:
             key = (chat_id, url)
             if key in active_tasks and not active_tasks[key].done():
-                continue  # уже мониторится
+                continue
             active_tasks[key] = asyncio.create_task(
                 monitor_link_selenium(chat_id, url, context.application)
             )
@@ -189,14 +188,20 @@ async def keyboard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await add_link_handler(update, context)
 
+async def clear_history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    clear_seen(update.effective_chat.id)
+    await update.message.reply_text("История отправленных объявлений очищена.")
+
 def main():
     init_db()
+    init_db_seen()
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("list", list_command))
     app.add_handler(CommandHandler("clear", clear_command))
     app.add_handler(CommandHandler("remove", remove_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, keyboard_handler))
+    app.add_handler(CommandHandler("clear_history", clear_history_command))
     app.run_polling()
 
 if __name__ == "__main__":
