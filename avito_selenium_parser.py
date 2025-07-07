@@ -105,7 +105,7 @@ async def monitor_link_selenium(chat_id, url, app):
             continue
 
         # Прокрутка
-        for _ in range(5):
+        for _ in range(4):
             driver.execute_script("window.scrollBy(0, window.innerHeight);")
             await asyncio.sleep(0.8)
         try:
