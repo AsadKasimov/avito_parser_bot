@@ -208,6 +208,7 @@ async def clear_history_command(update: Update, context: ContextTypes.DEFAULT_TY
     clear_seen(update.effective_chat.id)
     await update.message.reply_text("История отправленных объявлений очищена.")
 
+
 async def continue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Спасибо! Если решена капча, парсер продолжит.")
 
