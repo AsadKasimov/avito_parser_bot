@@ -18,6 +18,7 @@ markup = ReplyKeyboardMarkup(MENU_BUTTONS, resize_keyboard=True)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+active_tasks = {}
 
 def init_db():
     conn = sqlite3.connect(DATABASE)
@@ -30,17 +31,8 @@ def init_db():
             added_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS seen (
-            chat_id INTEGER,
-            ad_id TEXT,
-            added_at INTEGER,
-            PRIMARY KEY (chat_id, ad_id)
-        )
-    """)
     conn.commit()
     conn.close()
-
 
 def add_link(chat_id, url):
     conn = sqlite3.connect(DATABASE)
@@ -54,7 +46,6 @@ def add_link(chat_id, url):
     conn.close()
     return True
 
-
 def remove_link(chat_id, idx):
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
@@ -64,23 +55,18 @@ def remove_link(chat_id, idx):
         sub_id = rows[idx][0]
         url = rows[idx][1]
         c.execute("DELETE FROM subscriptions WHERE id=?", (sub_id,))
-        c.execute("DELETE FROM seen WHERE chat_id=? AND ad_id IN (SELECT ad_id FROM seen WHERE chat_id=? LIMIT 1000)",
-                  (chat_id, chat_id))
         conn.commit()
         conn.close()
         return url
     conn.close()
     return None
 
-
 def clear_links(chat_id):
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
     c.execute("DELETE FROM subscriptions WHERE chat_id=?", (chat_id,))
-    c.execute("DELETE FROM seen WHERE chat_id=?", (chat_id,))
     conn.commit()
     conn.close()
-
 
 def get_links(chat_id):
     conn = sqlite3.connect(DATABASE)
@@ -90,22 +76,11 @@ def get_links(chat_id):
     conn.close()
     return [row[0] for row in rows]
 
-
-active_tasks = {}
-
-
 def is_allowed(url):
-    if "/audio_i_video/" in url or "/predlozheniya_uslug/" in url:
-        return False
-    return url.startswith("http://") or url.startswith("https://")
-
+    return url.startswith("http") and "/audio_i_video/" not in url and "/predlozheniya_uslug/" not in url
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Пришли ссылку Avito для мониторинга или выбери действие на клавиатуре:",
-        reply_markup=markup
-    )
-
+    await update.message.reply_text("Пришли ссылку Avito для мониторинга или выбери действие на клавиатуре:", reply_markup=markup)
 
 async def add_link_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text.strip()
@@ -115,11 +90,9 @@ async def add_link_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     ok = add_link(chat_id, url)
     if ok:
-        await update.message.reply_text(
-            "Ссылка добавлена!\nНажмите 'Старт мониторинга' для мгновенного запуска браузера.")
+        await update.message.reply_text("Ссылка добавлена! Нажмите 'Старт мониторинга' для запуска.")
     else:
         await update.message.reply_text("Такая ссылка уже есть.")
-
 
 async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -130,24 +103,21 @@ async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply = "\n".join([f"{i + 1}. {url}" for i, url in enumerate(links)])
         await update.message.reply_text("Ваши ссылки:\n" + reply)
 
-
 async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     clear_links(update.effective_chat.id)
     await update.message.reply_text("Все ссылки удалены.")
-
 
 async def remove_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         idx = int(context.args[0]) - 1
     except (IndexError, ValueError):
-        await update.message.reply_text("Используй: /remove <номер из /list>")
+        await update.message.reply_text("Используй: /remove <номер из списка>")
         return
     url = remove_link(update.effective_chat.id, idx)
     if url:
         await update.message.reply_text(f"Удалено: {url}")
     else:
         await update.message.reply_text("Не могу найти такую ссылку.")
-
 
 async def keyboard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.lower()
@@ -177,9 +147,7 @@ async def keyboard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             key = (chat_id, url)
             if key in active_tasks and not active_tasks[key].done():
                 continue
-            active_tasks[key] = asyncio.create_task(
-                monitor_link_selenium(chat_id, url, context.application)
-            )
+            active_tasks[key] = asyncio.create_task(monitor_link_selenium(chat_id, url, context.application))
             started += 1
         if started:
             await update.message.reply_text("Мониторинг запущен для всех ссылок!")
@@ -197,21 +165,15 @@ async def keyboard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for key in to_cancel:
             del active_tasks[key]
         if stopped:
-            await update.message.reply_text("Мониторинг остановлен для всех ссылок.")
+            await update.message.reply_text("Мониторинг остановлен.")
         else:
             await update.message.reply_text("Нет активного мониторинга.")
     else:
         await add_link_handler(update, context)
 
-
 async def clear_history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     clear_seen(update.effective_chat.id)
-    await update.message.reply_text("История отправленных объявлений очищена.")
-
-
-async def continue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Спасибо! Если решена капча, парсер продолжит.")
-
+    await update.message.reply_text("История объявлений очищена.")
 
 def main():
     init_db()
@@ -221,11 +183,9 @@ def main():
     app.add_handler(CommandHandler("list", list_command))
     app.add_handler(CommandHandler("clear", clear_command))
     app.add_handler(CommandHandler("remove", remove_command))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, keyboard_handler))
     app.add_handler(CommandHandler("clear_history", clear_history_command))
-    app.add_handler(CommandHandler("continue", continue_command))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, keyboard_handler))
     app.run_polling()
-
 
 if __name__ == "__main__":
     main()
