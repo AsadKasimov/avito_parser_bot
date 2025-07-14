@@ -3,7 +3,7 @@ import asyncio
 import sqlite3
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
-from parser import monitor_link_parser, init_db_seen, clear_seen
+from avito_selenium_parser import monitor_link_parser, init_db_seen, clear_seen
 
 BOT_TOKEN = 'вставь_сюда_токен_бота'
 DATABASE = 'subscriptions.db'
