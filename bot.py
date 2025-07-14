@@ -5,7 +5,7 @@ from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 from avito_selenium_parser import monitor_link_parser, init_db_seen, clear_seen
 
-BOT_TOKEN = 'вставь_сюда_токен_бота'
+BOT_TOKEN = '7278056727:AAEG3cKN8jMoQlRX5ZsElq-KPnwf3xvD0u4'
 DATABASE = 'subscriptions.db'
 
 MENU_BUTTONS = [
