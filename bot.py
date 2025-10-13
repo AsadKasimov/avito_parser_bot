@@ -3,9 +3,9 @@ import asyncio
 import sqlite3
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
-from avito_selenium_parser import monitor_link_selenium, init_db_seen, clear_seen
+from avito_selenium_parser import monitor_link_selenium, init_db_seen, clear_seen, captcha_waiting
 
-BOT_TOKEN = '7278056727:AAEG3cKN8jMoQlRX5ZsElq-KPnwf3xvD0u4'
+BOT_TOKEN = "7278056727:AAEG3cKN8jMoQlRX5ZsElq-KPnwf3xvD0u4"
 DATABASE = 'subscriptions.db'
 
 MENU_BUTTONS = [
@@ -64,8 +64,7 @@ def remove_link(chat_id, idx):
         sub_id = rows[idx][0]
         url = rows[idx][1]
         c.execute("DELETE FROM subscriptions WHERE id=?", (sub_id,))
-        c.execute("DELETE FROM seen WHERE chat_id=? AND ad_id IN (SELECT ad_id FROM seen WHERE chat_id=? LIMIT 1000)",
-                  (chat_id, chat_id))
+        c.execute("DELETE FROM seen WHERE chat_id=?", (chat_id,))
         conn.commit()
         conn.close()
         return url
@@ -101,29 +100,24 @@ def is_allowed(url):
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Пришли ссылку Avito для мониторинга или выбери действие на клавиатуре:",
-        reply_markup=markup
-    )
+    await update.message.reply_text("Пришли ссылку Avito или выбери действие:", reply_markup=markup)
 
 
 async def add_link_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text.strip()
     chat_id = update.effective_chat.id
     if not is_allowed(url):
-        await update.message.reply_text("Ссылка не поддерживается или из запрещённого раздела.")
+        await update.message.reply_text("Ссылка не поддерживается.")
         return
     ok = add_link(chat_id, url)
     if ok:
-        await update.message.reply_text(
-            "Ссылка добавлена!\nНажмите 'Старт мониторинга' для мгновенного запуска браузера.")
+        await update.message.reply_text("Ссылка добавлена! Нажми 'Старт мониторинга'.")
     else:
         await update.message.reply_text("Такая ссылка уже есть.")
 
 
 async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    links = get_links(chat_id)
+    links = get_links(update.effective_chat.id)
     if not links:
         await update.message.reply_text("Список пуст.")
     else:
@@ -140,7 +134,7 @@ async def remove_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         idx = int(context.args[0]) - 1
     except (IndexError, ValueError):
-        await update.message.reply_text("Используй: /remove <номер из /list>")
+        await update.message.reply_text("Используй: /remove <номер>")
         return
     url = remove_link(update.effective_chat.id, idx)
     if url:
@@ -157,60 +151,44 @@ async def keyboard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "очистить все":
         await clear_command(update, context)
     elif text == "удалить ссылку":
-        await update.message.reply_text("Для удаления — напиши: /remove <номер>")
+        await update.message.reply_text("Для удаления — /remove <номер>")
     elif text == "помощь":
-        await update.message.reply_text(
-            "Команды:\n"
-            "/list — список ссылок\n"
-            "/remove <номер> — удалить ссылку\n"
-            "/clear — удалить все\n"
-            "Или пришли Avito-ссылку для мониторинга.\n"
-            "Нажми 'Старт мониторинга' чтобы запустить."
-        )
+        await update.message.reply_text("Команды: /list /remove /clear /continue")
     elif text == "старт мониторинга":
         links = get_links(chat_id)
         if not links:
-            await update.message.reply_text("Сначала добавь хотя бы одну ссылку!")
+            await update.message.reply_text("Нет ссылок.")
             return
-        started = 0
         for url in links:
             key = (chat_id, url)
-            if key in active_tasks and not active_tasks[key].done():
-                continue
-            active_tasks[key] = asyncio.create_task(
-                monitor_link_selenium(chat_id, url, context.application)
-            )
-            started += 1
-        if started:
-            await update.message.reply_text("Мониторинг запущен для всех ссылок!")
-        else:
-            await update.message.reply_text("Мониторинг уже идёт.")
+            if key not in active_tasks or active_tasks[key].done():
+                active_tasks[key] = asyncio.create_task(monitor_link_selenium(chat_id, url, context.application))
+        await update.message.reply_text("Мониторинг запущен.")
     elif text == "стоп мониторинга":
-        stopped = 0
         to_cancel = []
-        for key, task in list(active_tasks.items()):
-            chat_id_, url_ = key
-            if chat_id_ == chat_id and not task.done():
+        for key, task in active_tasks.items():
+            if key[0] == chat_id and not task.done():
                 task.cancel()
-                stopped += 1
                 to_cancel.append(key)
         for key in to_cancel:
             del active_tasks[key]
-        if stopped:
-            await update.message.reply_text("Мониторинг остановлен для всех ссылок.")
-        else:
-            await update.message.reply_text("Нет активного мониторинга.")
+        await update.message.reply_text("Мониторинг остановлен.")
     else:
         await add_link_handler(update, context)
 
 
 async def clear_history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     clear_seen(update.effective_chat.id)
-    await update.message.reply_text("История отправленных объявлений очищена.")
+    await update.message.reply_text("История очищена.")
 
 
 async def continue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Спасибо! Если решена капча, парсер продолжит.")
+    chat_id = update.effective_chat.id
+    if chat_id in captcha_waiting:
+        captcha_waiting[chat_id].set()
+        await update.message.reply_text("Спасибо! Продолжаю работу 🚀")
+    else:
+        await update.message.reply_text("Нет активной капчи.")
 
 
 def main():
@@ -221,9 +199,9 @@ def main():
     app.add_handler(CommandHandler("list", list_command))
     app.add_handler(CommandHandler("clear", clear_command))
     app.add_handler(CommandHandler("remove", remove_command))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, keyboard_handler))
     app.add_handler(CommandHandler("clear_history", clear_history_command))
     app.add_handler(CommandHandler("continue", continue_command))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, keyboard_handler))
     app.run_polling()
 
 

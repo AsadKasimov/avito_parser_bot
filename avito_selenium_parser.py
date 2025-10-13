@@ -9,12 +9,12 @@ import pickle
 import random
 
 DATABASE = 'subscriptions.db'
-MONITOR_INTERVAL = 5
 SEEN_LIMIT = 1000
 COOKIES_FILE = "avito_cookies.pkl"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
 
 drivers = {}  # chat_id -> driver
+captcha_waiting = {}  # chat_id -> asyncio.Event()
 
 
 def get_seen(chat_id):
@@ -72,10 +72,8 @@ def get_or_create_driver(chat_id):
     options.page_load_strategy = 'eager'
     options.add_argument('--disable-blink-features=AutomationControlled')
     options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--disable-javascript')
     prefs = {
         "profile.managed_default_content_settings.images": 2,
-        "profile.managed_default_content_settings.javascript": 2
     }
     options.add_experimental_option("prefs", prefs)
     driver = uc.Chrome(options=options)
@@ -112,17 +110,13 @@ async def monitor_link_selenium(chat_id, url, app):
         while True:
             html = driver.page_source
             if "Доступ ограничен" in html or ("Продолжить" in html and "капча" in html):
-                await app.bot.send_message(chat_id, "⚠️ КАПЧА! Открой браузер, реши капчу, затем отправь /continue.")
-                solved = False
-                while not solved:
-                    await asyncio.sleep(3)
-                    updates = await app.bot.get_updates()
-                    for upd in updates:
-                        if upd.message and upd.message.text and upd.message.text.lower() == "/continue":
-                            solved = True
-                            break
+                await app.bot.send_message(chat_id, "⚠️ КАПЧА! Реши её в браузере и напиши /continue")
+                if chat_id not in captcha_waiting:
+                    captcha_waiting[chat_id] = asyncio.Event()
+                captcha_waiting[chat_id].clear()
+                await captcha_waiting[chat_id].wait()
                 save_cookies()
-                await app.bot.send_message(chat_id, "Продолжаю работу!")
+                await app.bot.send_message(chat_id, "✅ Капча решена, продолжаю работу!")
                 continue
 
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
@@ -140,30 +134,28 @@ async def monitor_link_selenium(chat_id, url, app):
                 });
                 """)
             except Exception as e:
-                await app.bot.send_message(chat_id, f"Ошибка при извлечении данных объявлений: {e}")
+                await app.bot.send_message(chat_id, f"Ошибка при извлечении данных: {e}")
                 await asyncio.sleep(random.uniform(2, 3))
                 continue
 
             seen = get_seen(chat_id)
             new_ids = set()
 
-            async def parse_and_notify():
-                for card in cards_data:
-                    item_id = card['id']
-                    if not item_id or item_id in seen:
-                        continue
-                    title = card['title']
-                    price = card['price']
-                    link = card['link']
-                    if not title or not price or not link:
-                        continue
-                    url_full = 'https://www.avito.ru' + link
-                    if "iphone" not in url_full.lower():
-                        continue
-                    new_ids.add(item_id)
-                    await app.bot.send_message(chat_id, f"🆕 {title}\n💰 {price} ₽\n🔗 {url_full}")
+            for card in cards_data:
+                item_id = card['id']
+                if not item_id or item_id in seen:
+                    continue
+                title = card['title']
+                price = card['price']
+                link = card['link']
+                if not title or not price or not link:
+                    continue
+                url_full = 'https://www.avito.ru' + link
+                if "iphone" not in url_full.lower():
+                    continue
+                new_ids.add(item_id)
+                await app.bot.send_message(chat_id, f"🆕 {title}\n💰 {price} ₽\n🔗 {url_full}")
 
-            await parse_and_notify()
             save_seen_bulk(chat_id, new_ids)
 
             await asyncio.sleep(random.uniform(3, 5))
